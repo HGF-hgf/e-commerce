@@ -6,3 +6,9 @@ numpy
 python-dotenv
 scikit-learn
 pandas
+uvicorn
+fastapi
+pydantic
+google-genai
+google
+google-api-core
