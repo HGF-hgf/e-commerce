@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 import os
 from core import Reflection
 from chatbot import get_response
+import uvicorn
 
 load_dotenv()
 class Message(BaseModel):
@@ -45,30 +46,31 @@ def clearMessages():
 
 
 
-@app.websocket("/ws")
+@app.websocket("/api/chat")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     clients.append(websocket)
     
     try:
-        await websocket.send_text(json.dumps([message.dict() for message in messages]))
+        # Gửi danh sách tin nhắn ban đầu
+        await websocket.send_text(json.dumps({"message": [message.dict() for message in messages]}))
         while True:
             message = await websocket.receive_text()
             
-            # Wait for new messages
+            # Xử lý tin nhắn
             if message == "refresh":
                 clearMessages()
             else: 
                 messages.append(Message(message=message, sender="You"))
-                # send back the message so the frontend can render
+                # Gửi tin nhắn mới cho tất cả client
                 for client in clients:
-                    await client.send_text(json.dumps([message.dict() for message in messages]))
-                # now we actually start processing the message
+                    await client.send_text(json.dumps({"message": [message.dict() for message in messages]}))
+                # Xử lý tin nhắn
                 process_message(message)
                       
-            # Broadcast the message to all connected clients
+            # Broadcast danh sách tin nhắn đến tất cả client
             for client in clients:
-                await client.send_text(json.dumps([message.dict() for message in messages]))
+                await client.send_text(json.dumps({"message": [message.dict() for message in messages]}))
     except WebSocketDisconnect:
         print(f"WebSocket disconnected: {websocket.client}")
         clients.remove(websocket)
@@ -88,3 +90,6 @@ def aiResponse(message) -> str:
     )
     content = completion.choices[0].message.content
     return content if content is not None else ""
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
