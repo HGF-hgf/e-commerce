@@ -24,7 +24,7 @@ class UserIdRequest(BaseModel):
     user_id: str
     
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-mongo_client = MongoClient(os.getenv("MONGODB_URI"))
+mongo_client = MongoClient(os.getenv("MONGODB_URl"))
 db = mongo_client["HoangHaMobile"]
 collection = db["chat-history"]
 
