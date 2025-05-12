@@ -94,6 +94,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 try:
                     mentioned_data = get_mentioned(message, agent2)
+                    mentioned_json = json.loads(mentioned_data)
                 except Exception as e:
                     mentioned_data = {"mentioned_products": [], "error": str(e)}
 
@@ -109,7 +110,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_text(json.dumps({
                     "user_id": user_id,
                     "chat_history": [msg.dict() for msg in websocket.chat_history],
-                    "mentioned_products": mentioned_data.get("mentioned_products", [])
+                    "mentioned_products": mentioned_json.get("mentioned_products", [])
                 }))
                 
                 # Broadcast tin nhắn đến tất cả client (tùy chọn, nếu muốn chat nhóm)
