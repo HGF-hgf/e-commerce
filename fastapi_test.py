@@ -56,18 +56,6 @@ async def save_chat_history(user_id: str, chat_history: List[Message]):
         upsert=True
     )
     
-    
-def fix_json_string(json_str: str) -> str:
-    """Sửa chuỗi JSON không hợp lệ bằng cách thay thế dấu nháy đơn và loại bỏ ký tự không hợp lệ."""
-    # Thay dấu nháy đơn bằng dấu nháy kép, ngoại trừ trong giá trị chuỗi
-    try:
-        # Bỏ các ký tự xuống dòng hoặc tab không cần thiết
-        json_str = re.sub(r'\n\s*', '', json_str.strip())
-        # Thay dấu nháy đơn thành dấu nháy kép cho key JSON
-        json_str = re.sub(r"\'(\w+)\'(\s*:\s*)", r'"\1"\2', json_str)
-        return json_str
-    except Exception:
-        return json_str
 
 @app.websocket("/api/chat")
 async def websocket_endpoint(websocket: WebSocket):
@@ -102,9 +90,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 }))
             else:
                 # Thêm tin nhắn của người dùng
-                inner = fix_json_string(message)
-                inner = json.loads(inner)# Cập nhật data
-                print(inner)
+
                 user_message = Message(message=message, sender="You")
                 websocket.chat_history.append(user_message)
 
