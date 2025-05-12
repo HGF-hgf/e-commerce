@@ -96,7 +96,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     mentioned_data = get_mentioned(message, agent2)
                     mentioned_json = json.loads(mentioned_data)
                 except Exception as e:
-                    mentioned_data = {"mentioned_products": [], "error": str(e)}
+                    mentioned_json = {"mentioned_products": [], "error": str(e)}  # Ensure mentioned_json is defined
+
 
                 
                 # Cập nhật cơ sở dữ liệu
