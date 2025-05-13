@@ -3,7 +3,6 @@ from pymongo import MongoClient
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 import json
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -24,16 +23,13 @@ class Message(BaseModel):
 class UserIdRequest(BaseModel):
     user_id: str
 
-# Khởi tạo client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 mongo_client = MongoClient(os.getenv("MONGODB_URl"))
 db = mongo_client["HoangHaMobile"]
 collection = db["chat-history"]
 
-# Danh sách clients để quản lý các WebSocket
 clients: List[WebSocket] = []
 
-# Middleware CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -41,47 +37,92 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Hàm lấy lịch sử chat từ MongoDB
-async def load_chat_history(user_id: str) -> List[Message]:
-    chat_doc = collection.find_one({"user_id": user_id})
-    if chat_doc and "chat_history" in chat_doc:
-        return [Message(**msg) for msg in chat_doc["chat_history"]]
-    return []
+async def load_chat_history(user_id: str) -> str:
+    """Tải lịch sử chat từ MongoDB dưới dạng chuỗi."""
+    try:
+        chat_doc = collection.find_one({"user_id": user_id})
+        print(f"Loaded chat doc for user_id {user_id}: {chat_doc}")  # Debug
+        if chat_doc and "chat_history" in chat_doc:
+            history = chat_doc["chat_history"]
+            print(f"Loaded chat history string: {history}")  # Debug
+            return history
+        return ""
+    except Exception as e:
+        print(f"Error loading chat history: {str(e)}")
+        return ""
 
-# Hàm lưu lịch sử chat vào MongoDB
-async def save_chat_history(user_id: str, chat_history: List[Message]):
-    collection.update_one(
-        {"user_id": user_id},
-        {"$set": {"chat_history": [msg.dict() for msg in chat_history]}},
-        upsert=True
-    )
-    
+async def save_chat_history(user_id: str, chat_history: str):
+    """Lưu lịch sử chat vào MongoDB dưới dạng chuỗi."""
+    try:
+        result = collection.update_one(
+            {"user_id": user_id},
+            {"$set": {"chat_history": chat_history}},
+            upsert=True
+        )
+        print(f"Saved chat history for user_id {user_id}: {result.modified_count} modified, {result.upserted_id}")  # Debug
+    except Exception as e:
+        print(f"Error saving chat history: {str(e)}")
+
+def fix_json_string(json_str: str) -> str:
+    """Sửa chuỗi JSON không hợp lệ."""
+    try:
+        json_str = re.sub(r'\n\s*', '', json_str.strip())
+        json_str = re.sub(r"\'(\w+)\'(\s*:\s*)", r'"\1"\2', json_str)
+        return json_str
+    except Exception:
+        return json_str
+
+def build_context_string(chat_history: str, new_message: str = None, new_response: str = None) -> str:
+    """Xây dựng chuỗi ngữ cảnh từ lịch sử chat và tin nhắn/phản hồi mới."""
+    context = chat_history.strip()
+    if new_message:
+        context = f"{context}\nUser: {new_message}" if context else f"User: {new_message}"
+    if new_response:
+        context = f"{context}\nAssistant: {new_response}"
+    print(f"Built context string: {context}")  # Debug
+    return context.strip()
 
 @app.websocket("/api/chat")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     clients.append(websocket)
 
-    # Tạo hoặc sử dụng user_id
+    # Tạo hoặc lấy user_id từ client (nếu client gửi)
     user_id = str(uuid.uuid4())
     websocket.user_id = user_id
-
-    # Tải lịch sử chat từ MongoDB
     websocket.chat_history = await load_chat_history(user_id)
 
     try:
-        # Gửi user_id và lịch sử chat ban đầu
         await websocket.send_text(json.dumps({
             "user_id": user_id,
-            "chat_history": [msg.dict() for msg in websocket.chat_history]
+            "chat_history": websocket.chat_history.split("\n") if websocket.chat_history else []
         }))
 
         while True:
             message = await websocket.receive_text()
+            user_message_content = message
 
-            # Xử lý tin nhắn
-            if message == "refresh":
-                websocket.chat_history = []  # Xóa lịch sử chat
+            # Xử lý tin nhắn JSON lồng nhau
+            try:
+                data = json.loads(message)
+                user_id = data.get("user_id", user_id)  # Cập nhật user_id nếu client gửi
+                websocket.user_id = user_id
+                inner_json_str = data.get("message", message)
+                try:
+                    fixed_json_str = fix_json_string(inner_json_str)
+                    inner_data = json.loads(fixed_json_str)
+                    user_message_content = inner_data.get("message", inner_json_str)
+                except json.JSONDecodeError:
+                    user_message_content = inner_json_str
+                # Tải lại lịch sử nếu user_id thay đổi
+                if user_id != websocket.user_id:
+                    websocket.chat_history = await load_chat_history(user_id)
+            except json.JSONDecodeError:
+                user_message_content = message
+            print(f"Processed user message: {user_message_content}")  # Debug
+
+            if user_message_content == "refresh":
+                websocket.chat_history = ""
                 await save_chat_history(user_id, websocket.chat_history)
                 await websocket.send_text(json.dumps({
                     "user_id": user_id,
@@ -89,39 +130,35 @@ async def websocket_endpoint(websocket: WebSocket):
                     "mentioned_products": []
                 }))
             else:
-                # Thêm tin nhắn của người dùng
-
-                user_message = Message(message=message, sender="You")
-                websocket.chat_history.append(user_message)
-
-                # Lấy phản hồi từ bot
-                response = get_response(message, agent1)  # Giả sử trả về chuỗi
-                bot_message = Message(message=response, sender="Bot")
-                websocket.chat_history.append(bot_message)
-
-                # Xử lý mentioned products
-                try:
-                    mentioned_data = get_mentioned(message, agent2)
-                    mentioned_json = json.loads(mentioned_data)
-                except Exception as e:
-                    mentioned_json = {"mentioned_products": [], "error": str(e)}
-
-                # Lưu lịch sử chat vào MongoDB
+                # Cập nhật lịch sử với tin nhắn người dùng
+                websocket.chat_history = build_context_string(websocket.chat_history, new_message=user_message_content)
                 await save_chat_history(user_id, websocket.chat_history)
 
-                # Gửi lịch sử chat mới nhất và mentioned products
+                # Gọi get_response với chuỗi ngữ cảnh
+                context_str = websocket.chat_history
+                response = get_response(context_str, agent1)
+                # Cập nhật lịch sử với phản hồi bot
+                websocket.chat_history = build_context_string(websocket.chat_history, new_response=response)
+                await save_chat_history(user_id, websocket.chat_history)
+
+                # Xử lý mentioned products
+                mentioned = get_mentioned(user_message_content, agent2)
+                try:
+                    mentioned = json.loads(mentioned) if isinstance(mentioned, str) else mentioned
+                except json.JSONDecodeError:
+                    mentioned = []
+
                 await websocket.send_text(json.dumps({
                     "user_id": user_id,
-                    "chat_history": [msg.dict() for msg in websocket.chat_history],
-                    "mentioned_products": mentioned_json.get("mentioned_products", [])
+                    "chat_history": websocket.chat_history.split("\n") if websocket.chat_history else [],
+                    "mentioned_products": mentioned
                 }))
 
-                # Broadcast tin nhắn đến các client khác (nếu cần chat nhóm)
                 for client in clients:
                     if client != websocket:
                         await client.send_text(json.dumps({
                             "user_id": user_id,
-                            "message": message,
+                            "message": user_message_content,
                             "sender": "You"
                         }))
 
@@ -137,7 +174,7 @@ async def websocket_endpoint(websocket: WebSocket):
 async def get_chat_history(user_id: str):
     chat_history = await load_chat_history(user_id)
     if chat_history:
-        return {"user_id": user_id, "chat_history": [msg.dict() for msg in chat_history]}
+        return {"user_id": user_id, "chat_history": chat_history.split("\n") if chat_history else []}
     raise HTTPException(status_code=404, detail="Không tìm thấy lịch sử chat cho user_id này.")
 
 if __name__ == "__main__":

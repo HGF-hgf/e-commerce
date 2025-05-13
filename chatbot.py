@@ -9,6 +9,7 @@ from contextlib import redirect_stdout
 import re
 import json
 
+
 llm = OpenAI(model="gpt-4o-mini", temperature=0)
 
 agent_worker = FunctionCallingAgentWorker.from_tools(
@@ -73,7 +74,7 @@ def parse_function_output(verbose_text):
                 print(f"JSON error: {e}")
                 print(json_str)
                 continue
-    return ", ".join(names) if names else 'Không tìm thấy tên sản phẩm'
+    return names if names else 'Không tìm thấy tên sản phẩm'
 
 def get_mentioned(query, agent) -> str:
     # Lấy verbose output và response
@@ -85,5 +86,5 @@ def get_mentioned(query, agent) -> str:
 
 # query = "iPhone 16 Pro và Samsung Galaxy S25 Ultra"
 # res = get_mentioned(query, agent2)
-# response = get_response(query, agent1)
-# print(response)
+# # response = get_response(query, agent1)
+# print(res)
