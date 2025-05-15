@@ -31,3 +31,6 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+.__pycache__/
+__pycache__/
